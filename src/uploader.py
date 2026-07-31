@@ -41,7 +41,26 @@ def publish_video_publicly(video_path: str) -> str:
             timeout=300,
         )
     upload_resp.raise_for_status()
-    return upload_resp.json()["browser_download_url"]
+    video_url = upload_resp.json()["browser_download_url"]
+    _wait_until_url_ready(video_url)
+    return video_url
+
+
+def _wait_until_url_ready(url, attempts=10, delay=3):
+    """GitHub's release-asset CDN can take a few seconds to start serving a
+    just-uploaded file. Instagram fetches video_url itself, so it must already
+    be publicly reachable before we hand it over."""
+    last_status = None
+    for _ in range(attempts):
+        try:
+            resp = requests.head(url, allow_redirects=True, timeout=15)
+            last_status = resp.status_code
+            if resp.status_code == 200:
+                return
+        except requests.RequestException as exc:
+            last_status = str(exc)
+        time.sleep(delay)
+    raise RuntimeError(f"Video URL never became reachable (last status: {last_status}): {url}")
 
 
 def _graph_url(path):
@@ -63,7 +82,8 @@ def upload_to_instagram(video_url: str, caption: str, hashtags: list[str]) -> st
         },
         timeout=60,
     )
-    container_resp.raise_for_status()
+    if not container_resp.ok:
+        raise RuntimeError(f"Instagram container creation failed: {container_resp.status_code} {container_resp.text}")
     creation_id = container_resp.json()["id"]
 
     status = "IN_PROGRESS"
@@ -91,5 +111,6 @@ def upload_to_instagram(video_url: str, caption: str, hashtags: list[str]) -> st
         data={"creation_id": creation_id, "access_token": config.META_PAGE_ACCESS_TOKEN},
         timeout=60,
     )
-    publish_resp.raise_for_status()
+    if not publish_resp.ok:
+        raise RuntimeError(f"Instagram publish failed: {publish_resp.status_code} {publish_resp.text}")
     return publish_resp.json()["id"]
