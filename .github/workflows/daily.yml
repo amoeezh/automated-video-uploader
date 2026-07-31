@@ -9,8 +9,6 @@ on:
         description: "Validate everything but stop before publishing to Instagram"
         type: boolean
         default: true
-  push:
-    branches: [main]
 
 permissions:
   contents: write
@@ -48,8 +46,6 @@ jobs:
           if [ "$EVENT_NAME" = "schedule" ]; then
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
           elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DISPATCH_DRY_RUN" = "false" ]; then
-            echo "DRY_RUN=false" >> "$GITHUB_ENV"
-          elif [ "$EVENT_NAME" = "push" ]; then
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
           else
             echo "DRY_RUN=true" >> "$GITHUB_ENV"
