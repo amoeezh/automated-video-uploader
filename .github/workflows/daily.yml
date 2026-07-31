@@ -3,7 +3,12 @@ name: Daily Instagram Reel
 on:
   schedule:
     - cron: "0 14 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Validate everything but stop before publishing to Instagram"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -43,9 +48,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
+          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && 'true' || 'false' }}
         run: python src/pipeline.py
 
       - name: Commit updated history
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           git config user.name "reel-bot"
           git config user.email "reel-bot@users.noreply.github.com"

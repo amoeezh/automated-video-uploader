@@ -83,6 +83,9 @@ def upload_to_instagram(video_url: str, caption: str, hashtags: list[str]) -> st
     else:
         raise TimeoutError(f"Instagram container {creation_id} did not finish processing in time")
 
+    if os.environ.get("DRY_RUN") == "true":
+        return f"DRY_RUN_OK (container {creation_id} validated, not published)"
+
     publish_resp = requests.post(
         _graph_url(f"{config.IG_USER_ID}/media_publish"),
         data={"creation_id": creation_id, "access_token": config.META_PAGE_ACCESS_TOKEN},
