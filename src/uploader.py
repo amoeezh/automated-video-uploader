@@ -46,17 +46,18 @@ def publish_video_publicly(video_path: str) -> str:
     return video_url
 
 
-def _wait_until_url_ready(url, attempts=10, delay=3):
-    """GitHub's release-asset CDN can take a few seconds to start serving a
-    just-uploaded file. Instagram fetches video_url itself, so it must already
-    be publicly reachable before we hand it over."""
+def _wait_until_url_ready(url, attempts=20, delay=10):
+    """GitHub's release-asset CDN can take a while to start serving a just-uploaded
+    file, longer for bigger files. Instagram fetches video_url itself, so it must
+    already be publicly reachable before we hand it over. Uses GET (not HEAD) since
+    the signed redirect target doesn't reliably support HEAD."""
     last_status = None
     for _ in range(attempts):
         try:
-            resp = requests.head(url, allow_redirects=True, timeout=15)
-            last_status = resp.status_code
-            if resp.status_code == 200:
-                return
+            with requests.get(url, stream=True, allow_redirects=True, timeout=20) as resp:
+                last_status = resp.status_code
+                if resp.status_code == 200:
+                    return
         except requests.RequestException as exc:
             last_status = str(exc)
         time.sleep(delay)
