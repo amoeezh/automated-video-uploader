@@ -49,6 +49,8 @@ jobs:
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
           elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DISPATCH_DRY_RUN" = "false" ]; then
             echo "DRY_RUN=false" >> "$GITHUB_ENV"
+          elif [ "$EVENT_NAME" = "push" ]; then
+            echo "DRY_RUN=false" >> "$GITHUB_ENV"
           else
             echo "DRY_RUN=true" >> "$GITHUB_ENV"
           fi
