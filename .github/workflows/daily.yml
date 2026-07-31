@@ -9,6 +9,8 @@ on:
         description: "Validate everything but stop before publishing to Instagram"
         type: boolean
         default: true
+  push:
+    branches: [main]
 
 permissions:
   contents: write
@@ -38,6 +40,19 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
+      - name: Determine dry run mode
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            echo "DRY_RUN=false" >> "$GITHUB_ENV"
+          elif [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$DISPATCH_DRY_RUN" = "false" ]; then
+            echo "DRY_RUN=false" >> "$GITHUB_ENV"
+          else
+            echo "DRY_RUN=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Run pipeline
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -48,11 +63,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
-          DRY_RUN: ${{ github.event.inputs.dry_run == 'true' && 'true' || 'false' }}
         run: python src/pipeline.py
 
       - name: Commit updated history
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+        if: ${{ env.DRY_RUN != 'true' }}
         run: |
           git config user.name "reel-bot"
           git config user.email "reel-bot@users.noreply.github.com"
