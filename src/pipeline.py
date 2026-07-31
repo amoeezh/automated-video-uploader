@@ -1,0 +1,58 @@
+import json
+import sys
+import traceback
+from datetime import date
+
+import config
+import script_writer
+import script_reviewer
+import video_builder
+import uploader
+
+
+def log(msg):
+    print(f"[{date.today().isoformat()}] {msg}", flush=True)
+
+
+def update_history(title):
+    with open(config.STATE_FILE) as f:
+        history = json.load(f)
+    history["used_titles"].append(title)
+    history["used_titles"] = history["used_titles"][-100:]
+    with open(config.STATE_FILE, "w") as f:
+        json.dump(history, f, indent=2)
+
+
+def run():
+    log("Writing draft script (Gemini)...")
+    draft = script_writer.write_script()
+    log(f"Draft title: {draft['title']}")
+
+    log("Reviewing script (Groq/Llama)...")
+    final_script = script_reviewer.review_script(draft)
+
+    log("Building video (TTS + stock footage + captions)...")
+    video_path = video_builder.build_video(final_script)
+    log(f"Video rendered at {video_path}")
+
+    log("Publishing video file to a public URL (GitHub release)...")
+    video_url = uploader.publish_video_publicly(video_path)
+    log(f"Public video URL: {video_url}")
+
+    log("Uploading to Instagram...")
+    media_id = uploader.upload_to_instagram(
+        video_url, final_script["caption"], final_script.get("hashtags", [])
+    )
+    log(f"Published to Instagram, media id: {media_id}")
+
+    update_history(final_script["title"])
+    log("Done.")
+
+
+if __name__ == "__main__":
+    try:
+        run()
+    except Exception:
+        log("PIPELINE FAILED")
+        traceback.print_exc()
+        sys.exit(1)
