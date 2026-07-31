@@ -17,7 +17,7 @@ from moviepy.editor import (
 
 import config
 
-VOICE = "en-US-GuyNeural"
+VOICE = "en-US-AndrewNeural"
 FONT_CANDIDATES = [
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
@@ -31,13 +31,24 @@ def _font(size):
     return ImageFont.load_default()
 
 
-async def _synthesize(text, out_path):
-    communicate = edge_tts.Communicate(text, VOICE)
+def _prosody_for_position(index, total):
+    """Vary pacing so the narration doesn't sound flat: a slightly livelier
+    hook, steady/slower storytelling pace in the middle, and a slower, more
+    deliberate delivery for the closing lesson-learned line."""
+    if index == 0:
+        return {"rate": "+3%", "pitch": "+1Hz"}
+    if index == total - 1:
+        return {"rate": "-8%", "pitch": "-2Hz"}
+    return {"rate": "-3%", "pitch": "+0Hz"}
+
+
+async def _synthesize(text, out_path, rate="+0%", pitch="+0Hz"):
+    communicate = edge_tts.Communicate(text, VOICE, rate=rate, pitch=pitch)
     await communicate.save(out_path)
 
 
-def synthesize_line(text, out_path):
-    asyncio.run(_synthesize(text, out_path))
+def synthesize_line(text, out_path, rate="+0%", pitch="+0Hz"):
+    asyncio.run(_synthesize(text, out_path, rate=rate, pitch=pitch))
 
 
 def caption_image(text, width=config.VIDEO_WIDTH, height=config.VIDEO_HEIGHT):
@@ -125,10 +136,12 @@ def build_video(script: dict) -> str:
     os.makedirs(config.WORK_DIR, exist_ok=True)
     run_id = uuid.uuid4().hex[:8]
     sentence_clips = []
+    total_sentences = len(script["sentences"])
 
     for i, (sentence, keyword) in enumerate(zip(script["sentences"], script["visual_keywords"])):
         audio_path = os.path.join(config.WORK_DIR, f"{run_id}_{i}.mp3")
-        synthesize_line(sentence, audio_path)
+        prosody = _prosody_for_position(i, total_sentences)
+        synthesize_line(sentence, audio_path, rate=prosody["rate"], pitch=prosody["pitch"])
         audio_clip = AudioFileClip(audio_path)
         duration = audio_clip.duration
 
