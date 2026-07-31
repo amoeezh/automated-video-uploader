@@ -51,7 +51,7 @@ Return JSON with exactly this shape:
 """
 
     model = genai.GenerativeModel(
-        "gemini-2.0-flash",
+        "gemini-flash-latest",
         generation_config={"response_mime_type": "application/json"},
     )
     response = model.generate_content(prompt)
