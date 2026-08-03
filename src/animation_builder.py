@@ -27,6 +27,8 @@ def _render(gag, duration, out_dir):
         "--fps", str(RENDER_FPS),
         "--seed", str(random.randint(0, 1_000_000)),
     ]
+    if shutil.which("xvfb-run"):
+        cmd = ["xvfb-run", "-a"] + cmd
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
     if result.returncode != 0:
         raise RuntimeError(

@@ -35,7 +35,9 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-noto-core blender
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-noto-core blender \
+            xvfb libegl1 libgl1 libgl1-mesa-dri libglx-mesa0 libxi6 libxrender1 \
+            libxkbcommon0 libsm6
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
