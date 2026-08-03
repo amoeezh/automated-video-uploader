@@ -5,32 +5,42 @@ from datetime import date
 import google.generativeai as genai
 
 import config
+from retry import with_retry
 
 genai.configure(api_key=config.GEMINI_API_KEY)
 
-SYSTEM_PROMPT = """You are a scriptwriter for short vertical Instagram Reels (30-45 seconds)
-that tell TRUE historical stories. Every video is a real, verifiable historical story with a
-narrative arc, not just a list of facts. No fluff, no "in this video", no intros that waste time.
+GAG_TEMPLATES = ["bounce", "wobble", "spin_pop", "surprise_jump", "wiggle_dance"]
+
+SYSTEM_PROMPT = f"""You are a comedy writer for short vertical Instagram Reels (20-35 seconds)
+aimed at kids and families: silly, wholesome, meme-style jokes narrated in HINDI (Devanagari
+script only, simple everyday vocabulary a child can follow).
 
 Structure every script like this:
-1. Hook (1 sentence): drop the viewer into the middle of the story or its stakes, don't summarize it.
-2. Setup (1-2 sentences): who, where, when.
-3. Rising action / conflict (2-4 sentences): what happened, the tension, the stakes, the turn.
-4. Resolution (1-2 sentences): how it concluded.
-5. Lesson (exactly 1 final sentence): what we can actually learn from this story today. Start
-   this sentence with something like "The lesson:" or "What this teaches us is" or a natural
-   equivalent. It must be a genuine takeaway, not a restatement of the facts.
+1. Setup (1-2 sentences): a simple, relatable, silly everyday situation (a toy, an animal, a
+   food, a household object, a kid doing something silly).
+2. Escalation (2-3 sentences): the situation gets funnier and more exaggerated, building anticipation.
+3. Punchline (1 sentence): the joke payoff - the funniest, most surprising line.
+4. Tag line (1 sentence): one short extra laugh, or a silly mock-serious "moral of the story"
+   that kids will find funny.
 
-Each sentence must be short enough to be spoken in 3-5 seconds. Keep it historically accurate —
-if a detail is disputed or unverified, don't state it as fact. Output strict JSON only, matching
-the schema given."""
+Strict rules:
+- ALL text (sentences, caption) must be written in HINDI using Devanagari script. No English words
+  mixed in except universally known proper nouns if unavoidable.
+- 100% wholesome and kid-safe: no violence, no scary content, no romance, no dark or adult humor,
+  no put-downs of real people. Pure silly slapstick/meme humor, like a cartoon gag.
+- Each sentence must be short enough to be spoken in 3-4 seconds.
+- For "visual_keywords", choose exactly one tag per sentence from this fixed list only:
+  {json.dumps(GAG_TEMPLATES)}. Pick whichever gag best matches the comedic beat of that sentence
+  (e.g. "surprise_jump" for the punchline, "bounce"/"wobble"/"wiggle_dance" for build-up,
+  "spin_pop" for a silly transformation moment). Never invent new tags.
+Output strict JSON only, matching the schema given."""
 
 SCHEMA_HINT = {
-    "title": "short internal title, not shown on screen",
-    "sentences": ["7 to 9 sentences total, following the hook/setup/conflict/resolution/lesson structure. The LAST sentence must always be the lesson."],
-    "visual_keywords": ["one or two search keywords per sentence, same length as sentences"],
-    "caption": "Instagram caption text, 1-3 sentences, no hashtags in this field",
-    "hashtags": ["5 to 8 relevant hashtags without the # symbol"],
+    "title": "short internal title in English, not shown on screen",
+    "sentences": ["6 to 8 sentences total in Hindi (Devanagari), following the setup/escalation/punchline/tag structure. The second-to-last or last sentence is the punchline."],
+    "visual_keywords": ["one gag tag per sentence, same length as sentences, each one of: " + ", ".join(GAG_TEMPLATES)],
+    "caption": "Instagram caption text in Hindi, 1-2 short fun sentences, no hashtags in this field",
+    "hashtags": ["5 to 8 relevant hashtags without the # symbol, mix of Hindi-audience and kids/funny/meme tags"],
 }
 
 
@@ -43,6 +53,15 @@ def pick_topic(history):
 def load_history():
     with open(config.STATE_FILE) as f:
         return json.load(f)
+
+
+def _generate(prompt):
+    model = genai.GenerativeModel(
+        "gemini-flash-latest",
+        generation_config={"response_mime_type": "application/json"},
+    )
+    response = model.generate_content(prompt)
+    return json.loads(response.text)
 
 
 def write_script():
@@ -59,24 +78,23 @@ Avoid repeating these previously used titles/ideas:
 {json.dumps(avoid)}
 
 Return JSON with exactly this shape:
-{json.dumps(SCHEMA_HINT, indent=2)}
+{json.dumps(SCHEMA_HINT, indent=2, ensure_ascii=False)}
 """
 
-    model = genai.GenerativeModel(
-        "gemini-flash-latest",
-        generation_config={"response_mime_type": "application/json"},
-    )
-    response = model.generate_content(prompt)
-    data = json.loads(response.text)
+    data = with_retry(lambda: _generate(prompt), attempts=3, delay=15, label="Gemini script generation")
 
     if len(data["sentences"]) > config.MAX_SENTENCES:
-        # Keep the lesson (always the last sentence) even when trimming down to budget.
         keep = config.MAX_SENTENCES - 1
         data["sentences"] = data["sentences"][:keep] + [data["sentences"][-1]]
         data["visual_keywords"] = data["visual_keywords"][:keep] + [data["visual_keywords"][-1]]
+
+    data["visual_keywords"] = [
+        kw if kw in GAG_TEMPLATES else random.choice(GAG_TEMPLATES)
+        for kw in data["visual_keywords"]
+    ]
 
     return data
 
 
 if __name__ == "__main__":
-    print(json.dumps(write_script(), indent=2))
+    print(json.dumps(write_script(), indent=2, ensure_ascii=False))

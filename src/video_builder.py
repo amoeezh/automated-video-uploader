@@ -4,21 +4,26 @@ import textwrap
 import uuid
 
 import edge_tts
-import requests
 from PIL import Image, ImageDraw, ImageFont
 from moviepy.editor import (
     AudioFileClip,
     CompositeVideoClip,
     ImageClip,
-    VideoFileClip,
+    ImageSequenceClip,
     concatenate_videoclips,
-    vfx,
 )
 
+import animation_builder
 import config
+from retry import with_retry
 
-VOICE = "en-US-AndrewNeural"
+VOICE = "hi-IN-MadhurNeural"
 FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+    "/usr/share/fonts/truetype/noto/NotoSansDevanagari[wdth,wght].ttf",
+    "/System/Library/Fonts/Kohinoor.ttc",
+    "/System/Library/Fonts/Supplemental/DevanagariMT.ttc",
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
 ]
@@ -33,13 +38,13 @@ def _font(size):
 
 def _prosody_for_position(index, total):
     """Vary pacing so the narration doesn't sound flat: a slightly livelier
-    hook, steady/slower storytelling pace in the middle, and a slower, more
-    deliberate delivery for the closing lesson-learned line."""
+    setup, steady pace in the middle, and a punchy, emphasized delivery for
+    the punchline/tag lines at the end."""
     if index == 0:
         return {"rate": "+3%", "pitch": "+1Hz"}
-    if index == total - 1:
-        return {"rate": "-8%", "pitch": "-2Hz"}
-    return {"rate": "-3%", "pitch": "+0Hz"}
+    if index >= total - 2:
+        return {"rate": "+6%", "pitch": "+3Hz"}
+    return {"rate": "-2%", "pitch": "+0Hz"}
 
 
 async def _synthesize(text, out_path, rate="+0%", pitch="+0Hz"):
@@ -48,15 +53,18 @@ async def _synthesize(text, out_path, rate="+0%", pitch="+0Hz"):
 
 
 def synthesize_line(text, out_path, rate="+0%", pitch="+0Hz"):
-    asyncio.run(_synthesize(text, out_path, rate=rate, pitch=pitch))
+    with_retry(
+        lambda: asyncio.run(_synthesize(text, out_path, rate=rate, pitch=pitch)),
+        attempts=3, delay=10, label="edge-tts synthesis",
+    )
 
 
 def caption_image(text, width=config.VIDEO_WIDTH, height=config.VIDEO_HEIGHT):
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
-    font = _font(64)
+    font = _font(60)
 
-    wrapped = textwrap.fill(text, width=26)
+    wrapped = textwrap.fill(text, width=18)
     lines = wrapped.split("\n")
 
     line_height = font.getbbox("Ag")[3] + 20
@@ -78,57 +86,11 @@ def caption_image(text, width=config.VIDEO_WIDTH, height=config.VIDEO_HEIGHT):
     return img
 
 
-def search_pexels_video(keyword):
-    resp = requests.get(
-        "https://api.pexels.com/videos/search",
-        headers={"Authorization": config.PEXELS_API_KEY},
-        params={"query": keyword, "orientation": "portrait", "per_page": 5},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    videos = resp.json().get("videos", [])
-    if not videos:
-        resp = requests.get(
-            "https://api.pexels.com/videos/search",
-            headers={"Authorization": config.PEXELS_API_KEY},
-            params={"query": keyword, "per_page": 5},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        videos = resp.json().get("videos", [])
-    if not videos:
-        return None
-
-    video = videos[0]
-    files = sorted(video["video_files"], key=lambda f: f.get("height", 0), reverse=True)
-    best = next((f for f in files if f.get("height", 0) >= 720), files[0])
-    return best["link"]
-
-
-def download(url, out_path):
-    resp = requests.get(url, stream=True, timeout=60)
-    resp.raise_for_status()
-    with open(out_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=1 << 16):
-            f.write(chunk)
-
-
-def fit_clip_to_frame(clip, duration):
-    clip = clip.without_audio()
-    if clip.duration < duration:
-        clip = clip.fx(vfx.loop, duration=duration)
-    else:
-        clip = clip.subclip(0, duration)
-
-    target_ratio = config.VIDEO_WIDTH / config.VIDEO_HEIGHT
-    clip_ratio = clip.w / clip.h
-    if clip_ratio > target_ratio:
-        clip = clip.resize(height=config.VIDEO_HEIGHT)
-        clip = clip.crop(x_center=clip.w / 2, width=config.VIDEO_WIDTH)
-    else:
-        clip = clip.resize(width=config.VIDEO_WIDTH)
-        clip = clip.crop(y_center=clip.h / 2, height=config.VIDEO_HEIGHT)
-
+def build_gag_clip(gag, duration):
+    frame_dir, fps = animation_builder.render_gag_clip(gag, duration, config.WORK_DIR)
+    clip = ImageSequenceClip(frame_dir, fps=fps)
+    clip = clip.set_duration(duration)
+    clip = clip.resize(width=config.VIDEO_WIDTH)
     return clip
 
 
@@ -138,17 +100,14 @@ def build_video(script: dict) -> str:
     sentence_clips = []
     total_sentences = len(script["sentences"])
 
-    for i, (sentence, keyword) in enumerate(zip(script["sentences"], script["visual_keywords"])):
+    for i, (sentence, gag) in enumerate(zip(script["sentences"], script["visual_keywords"])):
         audio_path = os.path.join(config.WORK_DIR, f"{run_id}_{i}.mp3")
         prosody = _prosody_for_position(i, total_sentences)
         synthesize_line(sentence, audio_path, rate=prosody["rate"], pitch=prosody["pitch"])
         audio_clip = AudioFileClip(audio_path)
         duration = audio_clip.duration
 
-        video_url = search_pexels_video(keyword) or search_pexels_video(script["title"])
-        raw_path = os.path.join(config.WORK_DIR, f"{run_id}_{i}.mp4")
-        download(video_url, raw_path)
-        bg_clip = fit_clip_to_frame(VideoFileClip(raw_path), duration)
+        bg_clip = build_gag_clip(gag, duration)
 
         cap_img = caption_image(sentence)
         cap_path = os.path.join(config.WORK_DIR, f"{run_id}_{i}.png")

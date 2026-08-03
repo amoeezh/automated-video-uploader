@@ -2,7 +2,9 @@ name: Daily Instagram Reel
 
 on:
   schedule:
-    - cron: "0 14 * * *"
+    - cron: "0 3 * * *"
+    - cron: "0 11 * * *"
+    - cron: "0 17 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -20,7 +22,7 @@ concurrency:
 jobs:
   run-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,7 +35,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg fonts-dejavu-core
+          sudo apt-get install -y ffmpeg fonts-dejavu-core fonts-noto-core blender
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
@@ -51,17 +53,27 @@ jobs:
             echo "DRY_RUN=true" >> "$GITHUB_ENV"
           fi
 
-      - name: Run pipeline
+      - name: Run pipeline (retries on transient failure)
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           META_PAGE_ACCESS_TOKEN: ${{ secrets.META_PAGE_ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PYTHONPATH: ${{ github.workspace }}:${{ github.workspace }}/src
-        run: python src/pipeline.py
+        run: |
+          for attempt in 1 2 3; do
+            echo "=== Pipeline attempt $attempt/3 ==="
+            python src/pipeline.py && exit 0
+            echo "Attempt $attempt failed."
+            if [ "$attempt" -lt 3 ]; then
+              echo "Retrying in 60s..."
+              sleep 60
+            fi
+          done
+          echo "All 3 attempts failed."
+          exit 1
 
       - name: Commit updated history
         if: ${{ env.DRY_RUN != 'true' }}
