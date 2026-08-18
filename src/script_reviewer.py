@@ -30,7 +30,7 @@ Return strict JSON only, no markdown fences, no explanation.
 
 def _review(script):
     response = client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
+        model="openai/gpt-oss-120b",
         messages=[
             {"role": "system", "content": REVIEW_PROMPT},
             {"role": "user", "content": json.dumps(script, ensure_ascii=False)},

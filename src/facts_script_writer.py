@@ -3,12 +3,14 @@ import random
 from datetime import date
 
 import google.generativeai as genai
+from groq import Groq
 
 import config
 from chart_builder import CHART_TYPES, MAX_RACE_ENTITIES
 from retry import with_retry
 
 genai.configure(api_key=config.GEMINI_API_KEY)
+groq_client = Groq(api_key=config.GROQ_API_KEY)
 
 MAX_FACTS = 7
 MIN_ENTITIES, MAX_ENTITIES = 4, MAX_RACE_ENTITIES
@@ -95,13 +97,31 @@ def _pick_topic(pillars_key):
     return random.choice(pillars)
 
 
-def _generate(prompt):
+def _generate_gemini(prompt):
     model = genai.GenerativeModel(
         "gemini-flash-latest",
         generation_config={"response_mime_type": "application/json"},
     )
     response = model.generate_content(prompt)
     return json.loads(response.text)
+
+
+def _generate_groq(prompt):
+    response = groq_client.chat.completions.create(
+        model="openai/gpt-oss-120b",
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+        temperature=0.7,
+    )
+    return json.loads(response.choices[0].message.content)
+
+
+def _generate(prompt):
+    try:
+        return _generate_gemini(prompt)
+    except Exception as exc:
+        print(f"[fallback] Gemini generation failed ({exc}); falling back to Groq", flush=True)
+        return _generate_groq(prompt)
 
 
 def write_quick_facts_script():
