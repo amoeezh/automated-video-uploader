@@ -129,3 +129,81 @@ def upload_to_instagram(video_url: str, caption: str, hashtags: list[str]) -> st
         return resp.json()["id"]
 
     return with_retry(publish, attempts=3, delay=15, label="Instagram publish")
+
+
+YOUTUBE_UPLOAD_URL = "https://www.googleapis.com/upload/youtube/v3/videos"
+
+
+def youtube_configured() -> bool:
+    return bool(config.YOUTUBE_CLIENT_ID and config.YOUTUBE_CLIENT_SECRET and config.YOUTUBE_REFRESH_TOKEN)
+
+
+def _youtube_access_token():
+    resp = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "client_id": config.YOUTUBE_CLIENT_ID,
+            "client_secret": config.YOUTUBE_CLIENT_SECRET,
+            "refresh_token": config.YOUTUBE_REFRESH_TOKEN,
+            "grant_type": "refresh_token",
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
+
+
+def upload_to_youtube(video_path: str, title: str, caption: str, hashtags: list[str]) -> str:
+    """Upload the same rendered video as a YouTube Short."""
+    description = caption.strip()
+    if hashtags:
+        description += "\n\n" + " ".join(f"#{tag.lstrip('#')}" for tag in hashtags)
+    description += "\n\n#Shorts"
+
+    access_token = _youtube_access_token()
+    is_dry_run = os.environ.get("DRY_RUN") == "true"
+
+    metadata = {
+        "snippet": {
+            "title": title[:100],
+            "description": description[:5000],
+            "tags": [tag.lstrip("#") for tag in hashtags][:500],
+            "categoryId": "24",
+        },
+        "status": {
+            "privacyStatus": "private" if is_dry_run else "public",
+            "selfDeclaredMadeForKids": False,
+        },
+    }
+
+    def init_upload():
+        resp = requests.post(
+            YOUTUBE_UPLOAD_URL,
+            params={"uploadType": "resumable", "part": "snippet,status"},
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json; charset=UTF-8",
+            },
+            json=metadata,
+            timeout=30,
+        )
+        if not resp.ok:
+            raise RuntimeError(f"YouTube upload session init failed: {resp.status_code} {resp.text}")
+        return resp.headers["Location"]
+
+    upload_url = with_retry(init_upload, attempts=3, delay=10, label="YouTube upload session init")
+
+    def do_upload():
+        with open(video_path, "rb") as f:
+            resp = requests.put(
+                upload_url,
+                headers={"Content-Type": "video/mp4"},
+                data=f,
+                timeout=600,
+            )
+        if not resp.ok:
+            raise RuntimeError(f"YouTube video upload failed: {resp.status_code} {resp.text}")
+        return resp.json()
+
+    result = with_retry(do_upload, attempts=3, delay=15, label="YouTube video upload")
+    return result["id"]

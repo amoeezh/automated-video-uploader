@@ -45,6 +45,18 @@ def run():
     )
     log(f"Published to Instagram, media id: {media_id}")
 
+    if uploader.youtube_configured():
+        log("Uploading to YouTube...")
+        try:
+            youtube_id = uploader.upload_to_youtube(
+                video_path, final_script["title"], final_script["caption"], final_script.get("hashtags", [])
+            )
+            log(f"Published to YouTube, video id: {youtube_id}")
+        except Exception as exc:
+            log(f"YouTube upload failed (non-fatal): {exc}")
+    else:
+        log("YouTube not configured, skipping.")
+
     update_history(final_script["title"])
     log("Done.")
 

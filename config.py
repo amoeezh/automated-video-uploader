@@ -10,6 +10,11 @@ IG_USER_ID = os.environ["IG_USER_ID"]
 GITHUB_TOKEN = os.environ["GITHUB_TOKEN"]
 GITHUB_REPOSITORY = os.environ["GITHUB_REPOSITORY"]
 
+# Optional: YouTube upload is skipped (not fatal) if these aren't set
+YOUTUBE_CLIENT_ID = os.environ.get("YOUTUBE_CLIENT_ID", "")
+YOUTUBE_CLIENT_SECRET = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
+YOUTUBE_REFRESH_TOKEN = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
+
 WORK_DIR = "work"
 STATE_FILE = "state/history.json"
 TOPICS_FILE = "topics.json"
